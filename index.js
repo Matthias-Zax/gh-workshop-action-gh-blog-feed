@@ -7,6 +7,7 @@ async function run() {
     const token = core.getInput('token');
     const dryRun = core.getBooleanInput('dry-run');
     const labels = core.getMultilineInput('labels');
+    const days = core.getInput('days');
 
     const baseUrl = 'https://github.blog/feed/?s=';
     const octokit = github.getOctokit(token);
@@ -23,19 +24,32 @@ async function run() {
       await _formatAndPrintLogOutput(feed);
     }
 
-    // TODO: Create an issue in the workflow repo listing all rss feed items with their hyperlink, publication date, and title. Label the issue as "news-update".
+    // Sort blog entries by date in descending order
+    allFeeds.sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate));
+
+    // Filter blog entries by the number of days specified
+    const filteredFeeds = allFeeds.filter(item => {
+      const postDate = new Date(item.pubDate);
+      const currentDate = new Date();
+      const timeDiff = Math.abs(currentDate - postDate);
+      const diffDays = Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
+      return diffDays <= days;
+    });
+
+    // Create an issue in the workflow repo listing all rss feed items with their hyperlink, publication date, and title. Label the issue as "news-update".
     if (!dryRun) {
-      const issueBody = allFeeds.map(item => `- [${item.title}](${item.link})`).join('\n');
+      const issueBody = filteredFeeds.map(item => `- [${item.title}](${item.link}) - ${item.pubDate}`).join('\n');
+      const issueTitle = `News Update (${filteredFeeds[filteredFeeds.length - 1].pubDate} - ${filteredFeeds[0].pubDate})`;
       const issue = await octokit.rest.issues.create({
-      owner: github.context.repo.owner,
-      repo: github.context.repo.repo,
-      title: 'News Update',
-      body: issueBody,
-      labels: ['news-update']
+        owner: github.context.repo.owner,
+        repo: github.context.repo.repo,
+        title: issueTitle,
+        body: issueBody,
+        labels: ['news-update']
       });
     }
 
-    core.setOutput('feeds', JSON.stringify(allFeeds));
+    core.setOutput('feeds', JSON.stringify(filteredFeeds));
 
   } catch (error) {
     core.setFailed(error.message);
